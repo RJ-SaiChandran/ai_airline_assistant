@@ -3,8 +3,16 @@ from openai import OpenAI
 import gradio as gr
 from dotenv import load_dotenv
 import json
+import sqlite3
+
+DB = "prices.db"
 
 load_dotenv(override=True)
+
+with sqlite3.connect(DB) as conn:
+    cursor = conn.cursor()
+    cursor.execute('CREATE TABLE IF NOT EXISTS prices (city TEXT PRIMARY KEY, price REAL)')
+    conn.commit()
 
 gemini_api_key = os.getenv("GOOGLE_API_KEY")
 gemini_model = "gemini-3.1-flash-lite"
@@ -20,10 +28,26 @@ Always be accurate. If you don't know the answer, say so.
 ticket_prices = {"london": "$799", "paris": "$899", "tokyo": "$1400", "berlin": "$499"}
 
 def get_ticket_price(destination_city):
-    print(f"Tool called for city: {destination_city}")
-    price = ticket_prices.get(destination_city.lower(), "unknown")
+    print(f"[DATABASE QUERY] Tool called for city: {destination_city}", flush=True)
+    with sqlite3.connect(DB) as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT price FROM prices WHERE city = ?', (destination_city.lower(),))
+        price = cursor.fetchone()
+        if price:
+            return f"The price of a ticket to {destination_city} is {price[0]}."
+        else:
+            return f"The price of a ticket to {destination_city} is unknown."
     return f"The price of a ticket to {destination_city} is {price}."
 
+def set_ticket_price(city, price):
+    with sqlite3.connect(DB) as conn:
+        cursor = conn.cursor()
+        cursor.execute('INSERT INTO prices (city, price) VALUES (?, ?) ON CONFLICT(city) DO UPDATE SET price = ?', (city.lower(), price, price))
+        conn.commit()
+    return f"The price of a ticket to {city} has been set to {price}."
+
+# for city, price in ticket_prices.items():
+#     set_ticket_price(city, price)
 
 price_function = {
     "name": "get_ticket_price",
@@ -80,3 +104,4 @@ def chat(message, history):
     return response.choices[0].message.content
 
 gr.ChatInterface(chat).launch()
+# print(get_ticket_price("paris"))
