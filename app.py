@@ -23,6 +23,7 @@ system_message = """
 You are a helpful assistant for an Airline called FlightAI.
 Give short, courteous answers, no more than 1 sentence.
 Always be accurate. If you don't know the answer, say so.
+if you need to set the price of a ticket, use the set_ticket_price tool. but do not say like ticket price set, do not say that as noted or udpated etc. use other words. 
 """
 
 ticket_prices = {"london": "$799", "paris": "$899", "tokyo": "$1400", "berlin": "$499"}
@@ -49,36 +50,65 @@ def set_ticket_price(city, price):
 # for city, price in ticket_prices.items():
 #     set_ticket_price(city, price)
 
-price_function = {
-    "name": "get_ticket_price",
-    "description": "Get the price of a return ticket to the destination city.",
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "destination_city": {
-                "type": "string",
-                "description": "The city that the customer wants to travel to",
+price_function_schemas = [
+    {
+        "name": "get_ticket_price",
+        "description": "Get the price of a return ticket to the destination city.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "destination_city": {
+                    "type": "string",
+                    "description": "The city that the customer wants to travel to"
+                }
             },
-        },
-        "required": ["destination_city"],
-        "additionalProperties": False
+            "required": ["destination_city"],
+            "additionalProperties": False
+        }
+    },
+    {
+        "name": "set_ticket_price",
+        "description": "Set the price of a return ticket to the destination city.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "city": {
+                    "type": "string",
+                    "description": "The city that the customer wants to travel to"
+                },
+                "price": {
+                    "type": "number",
+                    "description": "The price of a return ticket to the destination city"
+                }
+            },
+            "required": ["city", "price"],
+            "additionalProperties": False
+        }
     }
-}
+]
+tools = [{"type": "function", "function": schema} for schema in price_function_schemas]
 
-tools = [{"type": "function", "function": price_function}]
+available_functions = {
+    "get_ticket_price": get_ticket_price,
+    "set_ticket_price": set_ticket_price,
+}
 
 def handle_tool_calls(message):
     responses = []
     for tool_call in message.tool_calls:
-        if tool_call.function.name == "get_ticket_price":
-            arguments = json.loads(tool_call.function.arguments)
-            city = arguments.get("destination_city")
-            price_details = get_ticket_price(city)
-            responses.append({
-                "role": "tool",
-                "content": price_details,
-                "tool_call_id": tool_call.id,
-            })
+        name = tool_call.function.name
+        arguments = json.loads(tool_call.function.arguments)
+        if name == "get_ticket_price":
+            result = available_functions[name](arguments.get("destination_city"))
+        elif name == "set_ticket_price":
+            result = available_functions[name](arguments.get("city"), arguments.get("price"))
+        else:
+            result = f"Unknown tool: {name}"
+        responses.append({
+            "role": "tool",
+            "content": result,
+            "tool_call_id": tool_call.id,
+        })
     return responses
 
 def chat(message, history):
@@ -94,7 +124,7 @@ def chat(message, history):
         message = response.choices[0].message
         responses = handle_tool_calls(message)
         messages.append(message)
-        messages.append(responses)
+        messages.extend(responses)
         response = client.chat.completions.create(
             model=gemini_model,
             messages=messages,
